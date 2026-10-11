@@ -1,0 +1,10 @@
+# Netlify build for the web (WASM) app. See docs/web.md.
+[build]
+  publish = "target/web/dist"
+  command = "curl https://sh.rustup.rs -sSf | sh -s -- -y && . $HOME/.cargo/env && rustup target add wasm32-unknown-unknown && cargo install wasm-bindgen-cli --version 0.2.129 --locked && cargo xtask web"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Cross-Origin-Opener-Policy = "same-origin"
+    Cross-Origin-Embedder-Policy = "require-corp"
