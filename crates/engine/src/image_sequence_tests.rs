@@ -74,11 +74,20 @@ fn item_of(r: &Value) -> ItemId {
 
 #[test]
 fn import_as_image_sequence_with_missing_frames() {
-    let dir = tmp_dir("imgseq-import");
+    check_image_sequence_with_missing_frames("shot_");
+}
+
+#[test]
+fn import_unicode_image_sequence_with_missing_frames() {
+    check_image_sequence_with_missing_frames("é");
+}
+
+fn check_image_sequence_with_missing_frames(prefix: &str) {
+    let dir = tmp_dir(&format!("imgseq-import-{prefix}"));
     let mut s = demo();
     s.execute("prefs.set", json!({"key": "media.indeterminateTimebase", "value": "25"})).unwrap();
     // frames 1..=6 with 4 missing, plus an unrelated file
-    let paths = write_frames(&dir, "shot_", &[1, 2, 3, 5, 6], "png");
+    let paths = write_frames(&dir, prefix, &[1, 2, 3, 5, 6], "png");
     write_frames(&dir, "other_", &[1], "png");
     let r = s.execute("file.import", json!({"paths": [paths[0]], "imageSequence": true})).unwrap();
     let id = item_of(&r);
@@ -110,6 +119,37 @@ fn import_as_image_sequence_with_missing_frames() {
     image::RgbaImage::from_pixel(4, 4, image::Rgba([1, 2, 3, 255])).save(&plain).unwrap();
     let e = s.execute("file.import", json!({"paths": [plain.to_string_lossy()], "imageSequence": true})).unwrap_err().to_string();
     assert!(e.contains("numbered"), "{e}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn import_numbered_webp_sequence_keeps_frames_and_alpha() {
+    let dir = tmp_dir("webp-sequence-import");
+    let mut paths = Vec::new();
+    for (n, rgba) in [(1, [10, 20, 30, 64]), (2, [40, 50, 60, 192])] {
+        let path = dir.join(format!("render_{n:04}.webp"));
+        let pixels = image::RgbaImage::from_pixel(4, 4, image::Rgba(rgba));
+        let mut encoded = Vec::new();
+        image::codecs::webp::WebPEncoder::new_lossless(&mut encoded).encode(pixels.as_raw(), 4, 4, image::ExtendedColorType::Rgba8).unwrap();
+        std::fs::write(&path, encoded).unwrap();
+        paths.push(path.to_string_lossy().to_string());
+    }
+    for automatic in [false, true] {
+        let mut s = demo();
+        if automatic {
+            s.execute("prefs.set", json!({"key": "media.importImageSequences", "value": true})).unwrap();
+        }
+        let r = s.execute("file.import", json!({"paths": [paths[0]], "imageSequence": !automatic})).unwrap();
+        let id = item_of(&r);
+        let src = s.media.source_for(&s.project, id, &*s.services).unwrap();
+        assert_eq!(src.info().kind, MediaKind::ImageSequence);
+        assert_eq!(r["imageSequences"][0]["frames"], 2);
+        for (frame, expected) in [[10, 20, 30, 64], [40, 50, 60, 192]].into_iter().enumerate() {
+            let image = src.video_frame(FrameRequest::full(src.info().frame_rate().tick_of(frame as i64))).unwrap();
+            let filmcraft_frame::PixelData::Rgba8(pixels) = &image.data else { panic!("expected RGBA frames") };
+            assert_eq!(&pixels[..4], &expected);
+        }
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
 
